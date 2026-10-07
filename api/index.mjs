@@ -8,6 +8,22 @@ export default async function handler(req,res){
  const key=process.env.SUPABASE_SECRET_KEY||'';
  const url=process.env.SUPABASE_URL||'https://ksemtrbeouvagobyrbvi.supabase.co';
  const name=req.query?.route||new URL(req.url,'https://foodsight.invalid').searchParams.get('route');
+ if(process.env.FOODSIGHT_BRIDGE_KEY){
+  const allowed=new Set(['status',...RPC,'save_plan','purchase']);
+  if(!allowed.has(name))return send(res,404,{error:'عملية غير معروفة'});
+  if((name==='status'&&req.method!=='GET')||(name!=='status'&&req.method!=='POST'))return send(res,405,{error:'طلب غير صالح'});
+  if(req.headers.origin){const origin=new URL(req.headers.origin);if(origin.protocol!=='https:'||origin.host!==req.headers.host)return send(res,403,{error:'المصدر غير مسموح'});}
+  if(req.method==='POST'&&!String(req.headers['content-type']||'').startsWith('application/json'))return send(res,415,{error:'طلب غير صالح'});
+  const body=req.method==='POST'?(typeof req.body==='string'?req.body:JSON.stringify(req.body||{})):undefined;
+  if(body&&Buffer.byteLength(body)>100000)return send(res,413,{error:'الطلب كبير جدًا'});
+  const upstream=await fetch(url+'/functions/v1/foodsight-vercel-bridge?route='+encodeURIComponent(name),{
+   method:req.method,
+   headers:{'content-type':'application/json','x-foodsight-bridge':process.env.FOODSIGHT_BRIDGE_KEY,'x-foodsight-origin':'https://'+req.headers.host,'x-foodsight-token':req.headers['x-foodsight-token']||''},
+   body,signal:AbortSignal.timeout(28000)
+  });
+  const data=await upstream.json().catch(()=>({error:'تعذر الاتصال بقاعدة البيانات'}));
+  return send(res,upstream.status,data);
+ }
  if(name==='status'&&req.method==='GET'){const stamp=String(Date.now());return send(res,200,{hosted:true,configured:!!key,token:key?stamp+'.'+signature(key,stamp):''});}
  if(name==='configure')return send(res,404,{error:'إعداد الاتصال يتم في متغيرات بيئة Vercel فقط'});
  if(req.method!=='POST')return send(res,405,{error:'طلب غير صالح'});
